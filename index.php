@@ -1,14 +1,13 @@
 <?php
 //composer's wizardry. links twitter API wrapper
 require_once __DIR__.'/vendor/autoload.php';
+require_once __DIR__.'/GlobalStaticConfigStorage.php';
 /**
  * represents entrypoint
  */
 class MainProcessor {
     private $instMainRenderer;
-    private static $globalAppConfig = array(
-    'twitterconfig' => 'appsettings.json',
-    );
+    //$globalAppConfig moved to GlobalStaticConfigStorage
     public function __construct() {
         $this->instMainRenderer = new MainRenderer();
     }
@@ -35,17 +34,14 @@ class MainProcessor {
 
             break;
           default:
-            handle_error();  
+            //handle_error();  
             break;
         }
     }
-    private function obtainTwitterConfig() {
-        $str = file_get_contents(__DIR__."/".MainProcessor::$globalAppConfig['twitterconfig']);
-        $json = json_decode($str, true);
-        return $json;
-    }
+    //private function obtainTwitterConfig() moved to GlobalStaticConfigStorage
+
     private function obtainHomeTimelineContentInitial() {
-        $twitterDeveloperAccessCredentials = $this->obtainTwitterConfig();
+        $twitterDeveloperAccessCredentials = GlobalStaticConfigStorage::obtainTwitterConfig();
         /*
         echo "<pre>".json_encode($twitterDeveloperAccessCredentials)."</pre>";
          */
@@ -64,10 +60,16 @@ class MainProcessor {
     private function resolveGetQuery() {
         if (isset($_GET['action'])) {
             if ($_GET['action']=='dispatch') { 
+                //twitter API library return a json string, decode it
                 $contentRaw = json_decode($this->obtainHomeTimelineContentInitial(),true);
                 $this->instMainRenderer->renderDispatchPage($contentRaw);
-            } else { //bad action value, show landing page
+            } else { 
+                if ($_GET['action']=='ajax_get_update') {
+                    echo "WRONG REQUEST!";
+                } else {
+                //bad action value, show landing page
                 $this->instMainRenderer->renderLandingPage();
+                }
             }
         } else { 
             $this->instMainRenderer->renderLandingPage();
@@ -94,18 +96,48 @@ class MainRenderer {
      */
     public function renderDispatchPage($in_contentRaw) {
         //declare here jQuery part of page
-        echo '<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>';
+        echo "<script src=\"https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js\"></script>";
         echo "<script type=\"text/javascript\">";
-        echo '  setInterval(update, 1000);';
-        //perform update in cycle
-        echo 'function update(){
-                 
-              }';
+        //https://stackoverflow.com/questions/9642205/how-to-force-a-script-reload-and-re-execute
+        //https://stackoverflow.com/questions/7718935/load-scripts-asynchronously
+        echo  "function reloadJs(src1) {"
+             ."src = $('script[src$=\"' + src1 + '\"]').attr(\"src\");"
+             ."$('script[src$=\"' + src + '\"]').remove();";
+        echo  "var head= document.getElementsByTagName('head')[0];";
+        echo  "var script= document.createElement('script');"
+             ."script.type= 'text/javascript';"
+             ."script.src= src1; script.async=true;"
+                . "head.appendChild(script); }";
+        echo "reloadJs(\"https://platform.twitter.com/widgets.js\");";
+        echo "</script>";
+        echo "<script type=\"text/javascript\">";
+        echo "  setInterval(update, Math.round(1000*60*".GlobalStaticConfigStorage::$globalAppConfig["updatefrequency"]."));";
+        //perform update in cycle, over the defined amount of minutes
+        echo "function update(){ ";
+        //update timestamp
+        echo "   var dt = new Date();";
+        echo "   var utcDate = dt.toUTCString();";
+        echo "   document.getElementById(\"timestamp\").innerHTML = utcDate; ";
+        //update page content, configure AJAX query to server. Once again, query is done every updatefrequency minutes (minvalue = 1) not to abuse Twitter services
+        //set URL
+        $params = /*$_GET;*/array(); $params["action"] = "ajax_get_update";
+        //$AJAX_path = $_SERVER['PHP_SELF']."?".http_build_query($params);
+        $AJAX_path = GlobalStaticConfigStorage::$globalAppConfig["updatehandler"]."?".http_build_query($params);
+        echo "   var jqxhr = $.get(\"".$AJAX_path."\", "
+                //jquery handler - server answer. I suppose that client should not get busy generating a frontend part, but instead receive from server a pregenerated HTML-ready code
+                // and then just paste it to a certain div. It is way better for productivity (backend operates more resources than frontend), but somewhat violates strict architectural practices
+                . "function (data) {"
+                . "document.getElementById(\"tweets-content-smnm\").innerHTML = data;"
+                ." reloadJs(\"https://platform.twitter.com/widgets.js\");"
+                . "}".");";
+        echo "}";
         echo "</script>";
         
         echo "<h1 style=\"font-size:40px; margin-top:30px; margin-bottom:30px; text-align:center\">Twitter Home Timeline [Display]</h1>";
-        echo "<script async src=\"https://platform.twitter.com/widgets.js\" charset=\"utf-8\"></script>";
-        
+        //echo "<script async src=\"https://platform.twitter.com/widgets.js\" charset=\"utf-8\"></script>";
+        echo "<div id=\"timestamp-common\" style=\"width:100%\"> Updated every <span id=\"timestamp-delay\">".GlobalStaticConfigStorage::$globalAppConfig["updatefrequency"]." min</span> || Last update: <span id=\"timestamp\"> on page loading </span> </div>";
+        echo "<br/>";
+        echo "<div id=\"tweets-content-smnm\" >";
         foreach ($in_contentRaw as $singleTweet) {
             //let's prepare main text of tweet for output by prerendering all the links
                 $rawText = $singleTweet['text'];
@@ -116,12 +148,12 @@ class MainRenderer {
             echo '<blockquote class="twitter-tweet" data-lang="'.$singleTweet['user']['lang'].'">';
             echo '<p lang="'.$singleTweet['lang'].'" dir="'."ltr".'">';
             echo $result2;
-            echo '</p>';
+            echo "</p>";
             echo '&mdash '.$singleTweet['user']['name'].'(@'.$singleTweet['user']['screen_name'].') '.'<a href="https://twitter.com/'.$singleTweet['user']['screen_name'].'/status/'.$singleTweet['id_str'].'?ref_src=twsrc%5Etfw">'.$singleTweet['created_at'].'</a>';
-            echo '</blockquote>';
+            echo "</blockquote>";
             
         }
-        
+        echo "</div>";
         //echo $in_contentRaw;
     }
     private function addOrUpdateUrlParam($name, $value) {
@@ -136,7 +168,7 @@ class MainRenderer {
 <html>
     <head>
         <meta charset="UTF-8">
-        <title>Twitter Home Timeline</title>
+        <title>Twitter Timeline / Feed</title>
     </head>
     <body>
         <?php
