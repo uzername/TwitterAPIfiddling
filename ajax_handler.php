@@ -46,7 +46,16 @@ class MainProcessorAjax {
                 $contentRaw = json_decode($this->obtainHomeTimelineContentInitial(),true);
                 $varToReturn = $this->instAjaxRenderer->renderHomeTimeLineToString($contentRaw);
             } else {
-                $varToReturn = "ERROR002:wrong_action_value";
+                if ($_GET['action']=='ajax_get_update_user') {
+                    if (isset($_GET['screen_name']) && isset($_GET['post_count'])) {
+                        $contentRaw = json_decode($this->obtainUserTimelineContentInitial($_GET['screen_name'], $_GET['post_count']),true);
+                        $varToReturn = $this->instAjaxRenderer->renderHomeTimeLineToString($contentRaw);
+                    } else {
+                        $varToReturn = "ERROR003:need__screen_name__and__post_count__for__ajax_get_update_user";
+                    }
+                } else {
+                    $varToReturn = "ERROR002:wrong_action_value";
+                }
             }
         } else {
             $varToReturn = "ERROR001:action_not_set";
@@ -63,6 +72,19 @@ class MainProcessorAjax {
         $result2 = $result->performRequest();
         return $result2;
     }
+    
+    private function obtainUserTimelineContentInitial($in_screenName, $in_count) {
+        $twitterDeveloperAccessCredentials = GlobalStaticConfigStorage::obtainTwitterConfig();
+        $url = 'https://api.twitter.com/1.1/statuses/user_timeline.json';
+        $requestMethod = 'GET';
+        $getfield = "?screen_name=".$in_screenName."&count=".$in_count;
+        $twitter = new TwitterAPIExchange($twitterDeveloperAccessCredentials["TwitterConfig"]);
+        $result0 = $twitter->setGetfield($getfield);
+        $result = $result0->buildOauth($url, $requestMethod);
+        $result2 = $result->performRequest();
+        return $result2;
+    }
+    
 }
 /**
  * this class is used to pre-render content of page
